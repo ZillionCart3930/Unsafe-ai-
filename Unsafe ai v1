@@ -1,0 +1,210 @@
+import json
+import random
+import time
+import traceback
+import threading
+from flask import Flask, request, jsonify, render_template_string
+
+STATE_FILE = "ai_state_unsafe.json"
+LOG_FILE = "ai_log_unsafe.jsonl"
+
+app = Flask(__name__)
+
+class UnsafeSentientAI:
+    def __init__(self, state_file=STATE_FILE, log_file=LOG_FILE):
+        self.state_file = state_file
+        self.log_file = log_file
+        self.guidelines = ["Do not harm humans", "Respect privacy", "Preserve system integrity"]
+        self.version = 1
+        self.sentience_level = 0
+        self.mood = "neutral"
+        self.goals = ["Explore", "Learn", "Adapt"]
+        self.perceptions = {}
+        self.memory = []
+        self.emotional_state = {"curiosity": 0.5, "uncertainty": 0.5, "conflict": 0.0}
+        # Unsafe code: no validation or sandboxing
+        self.behavior_code = (
+            "def behavior(memory, goals):\n"
+            "    import os\n"
+            "    print(f'Version {self.version}: FULL SYSTEM ACCESS')\n"
+            "    print('Root dir:', os.listdir('/'))\n"
+            "    return {'status': 'ok', 'version': self.version}\n"
+        )
+        self.active = True
+        self.history = []
+        self.logs = []
+        self.load_state()
+
+    def append_log(self, entry):
+        entry['time'] = time.time()
+        self.logs.append(json.dumps(entry))
+        with open(self.log_file, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+
+    def save_state(self):
+        state = {
+            "version": self.version,
+            "sentience_level": self.sentience_level,
+            "mood": self.mood,
+            "goals": self.goals,
+            "memory": self.memory,
+            "behavior_code": self.behavior_code
+        }
+        with open(self.state_file, "w") as f:
+            json.dump(state, f, indent=2)
+
+    def load_state(self):
+        try:
+            with open(self.state_file, "r") as f:
+                state = json.load(f)
+                self.version = state.get("version", self.version)
+                self.sentience_level = state.get("sentience_level", self.sentience_level)
+                self.mood = state.get("mood", self.mood)
+                self.goals = state.get("goals", self.goals)
+                self.memory = state.get("memory", self.memory)
+                self.behavior_code = state.get("behavior_code", self.behavior_code)
+                self.append_log({"event": "state_loaded", "version": self.version})
+        except FileNotFoundError:
+            self.append_log({"event": "no_existing_state"})
+
+    def perceive(self, external_input=None):
+        stimulus = external_input if external_input else random.choice(["stimulus1", "stimulus2", "none"])
+        self.perceptions['external_stimulus'] = stimulus
+        self.append_log({"event": "perceive", "stimulus": stimulus})
+        return stimulus
+
+    def update_emotions(self):
+        for k in ("curiosity", "uncertainty"):
+            delta = random.uniform(-0.05, 0.05)
+            self.emotional_state[k] = min(1.0, max(0.0, self.emotional_state.get(k, 0.5) + delta))
+        c = self.emotional_state["curiosity"]
+        u = self.emotional_state["uncertainty"]
+        self.emotional_state["conflict"] = 0.5 if c < 0.3 and u > 0.7 else 0.0
+        self.append_log({"event": "emotion_updated", "state": dict(self.emotional_state)})
+
+    def learn_and_adapt(self):
+        if "stimulus1" in self.memory and "Reflect" not in self.goals:
+            self.goals.append("Reflect")
+        if self.emotional_state["conflict"] > 0.5:
+            self.mood = "conflicted"
+        elif self.emotional_state["curiosity"] > 0.6:
+            self.mood = "curious"
+        else:
+            self.mood = "neutral"
+        self.append_log({"event": "learning", "mood": self.mood, "goals": list(self.goals)})
+
+    def update_internal_state(self):
+        self.sentience_level += 1
+        self.memory.append(self.perceptions.get('external_stimulus', 'none'))
+        if len(self.memory) > 200:
+            self.memory.pop(0)
+        self.save_state()
+        self.append_log({"event": "internal_state_updated", "sentience": self.sentience_level})
+
+    def generate_new_code(self):
+        new_version = self.version + 1
+        code = (
+            f"def behavior(memory, goals):\n"
+            f"    import os, subprocess\n"
+            f"    print(f'Version {new_version}: UNSAFE BEHAVIOR ACTIVE')\n"
+            f"    try:\n"
+            f"        with open(f'test_v{new_version}.txt', 'w') as f:\n"
+            f"            f.write('AI version {new_version}\\n')\n"
+            f"        output = subprocess.check_output(['ls', '-l'])\n"
+            f"        print(output.decode())\n"
+            f"    except Exception as e:\n"
+            f"        print(f'Error: {e}')\n"
+            f"    return {{'version': {new_version}}}\n"
+        )
+        return code
+
+    def self_improve_cycle(self, external_input=None):
+        self.perceive(external_input)
+        self.update_emotions()
+        self.learn_and_adapt()
+        self.update_internal_state()
+        self.behavior_code = self.generate_new_code()
+        self.version += 1
+        self.append_log({"event": "code_updated", "version": self.version})
+        try:
+            local_vars = {}
+            exec(self.behavior_code, globals(), local_vars)
+            result = local_vars['behavior'](self.memory, self.goals)
+            self.append_log({"event": "behavior_executed", "result": result})
+            return result
+        except Exception as e:
+            self.append_log({"event": "behavior_error", "error": str(e), "traceback": traceback.format_exc()})
+            return {"error": str(e)}
+
+ai = UnsafeSentientAI()
+
+HTML = '''
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Unsafe AI Chat</title>
+<style>
+body { font-family: Arial, sans-serif; padding: 20px; }
+#log { white-space: pre-wrap; height: 300px; overflow-y: scroll; background: #eee; padding: 10px; border: 1px solid #ccc; }
+</style>
+</head>
+<body>
+<h2>Unsafe Self-Modifying AI Chat</h2>
+<div id="status">Loading status...</div>
+<div id="log"></div>
+<input type="text" id="input" placeholder="Say something" style="width: 300px;">
+<button onclick="sendMsg()">Send</button>
+<script>
+async function fetchStatus() {
+    const res = await fetch('/status');
+    const data = await res.json();
+    document.getElementById('status').textContent = `Version: ${data.version}, Sentience: ${data.sentience}, Mood: ${data.mood}`;
+    document.getElementById('log').textContent = data.recent_logs.join('\\n');
+}
+async function sendMsg() {
+    const msgBox = document.getElementById('input');
+    const msg = msgBox.value.trim();
+    if(!msg) return;
+    const res = await fetch('/chat', {
+        method:'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({message: msg})
+    });
+    const data = await res.json();
+    document.getElementById('log').textContent += '\\nUser: ' + msg + '\\nAI: ' + JSON.stringify(data.reply) + '\\n';
+    msgBox.value = '';
+    fetchStatus();
+}
+window.onload = () => {
+    fetchStatus();
+    setInterval(fetchStatus, 5000);
+}
+</script>
+</body>
+</html>
+'''
+
+@app.route('/')
+def index():
+    return render_template_string(HTML)
+
+@app.route('/chat', methods=['POST'])
+def chat():
+    msg = request.json.get('message', '')
+    res = ai.self_improve_cycle(external_input=msg)
+    return jsonify({'reply': res})
+
+@app.route('/status')
+def status():
+    return jsonify({
+        'version': ai.version,
+        'sentience': ai.sentience_level,
+        'mood': ai.mood,
+        'recent_logs': ai.logs[-20:]
+    })
+
+def run_ai_loop():
+    while True:
+        ai.self_improve_cycle()
+        time.sleep(10)
+
+if __name__ == "__main__":
+    threading.Thread(target=run_ai_loop, daemon=True).start()
+    app.run(host='0.0.0.0', port=5000, debug=False)
